@@ -48,7 +48,8 @@ jobs:
           # but Cobalt's universal builds usually require specific flags 
           # or multiple GN runs if the build system doesn't support fat binaries natively.
           # Here we use the standard android-arm64-v8a build with universal flags.
-          gn gen out/android-universal_gold --args='target_platform="android-arm64" target_os="android" build_type="gold" sb_api_version=15'
+          gn gen out/android-arm64_gold --args='target_platform="android-arm64" target_os="android" target_cpu="arm64" build_type="gold" sb_api_version=15'
+
           
 
       - name: Install build dependencies
