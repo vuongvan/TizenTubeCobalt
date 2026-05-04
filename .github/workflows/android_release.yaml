@@ -1,7 +1,7 @@
 name: android_release_universal
 
 on:
-  workflow_dispatch: # Allows manual triggering
+  workflow_dispatch: # 允许手动触发
   push:
     tags:
       - 'v*'
@@ -42,15 +42,11 @@ jobs:
       - name: Set PYTHONPATH
         run: echo "PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH" >> $GITHUB_ENV
 
-      - name: GN (Universal Config)
+      - name: GN (Generate Config)
         run: |
-          # Note: target_cpu="x64" or "arm64" is often the host/primary, 
-          # but Cobalt's universal builds usually require specific flags 
-          # or multiple GN runs if the build system doesn't support fat binaries natively.
-          # Here we use the standard android-arm64-v8a build with universal flags.
-          gn gen out/android-arm64_gold --args='target_platform="android-arm64" target_os="android" target_cpu="arm64" build_type="gold" sb_api_version=15'
-
-          
+          # 统一输出目录名为 out/android-universal_gold
+          # 强制指定 target_cpu 为 arm64 以避免 x86 指令集冲突
+          gn gen out/android-universal_gold --args='target_platform="android-arm64" target_os="android" target_cpu="arm64" build_type="gold" sb_api_version=15'
 
       - name: Install build dependencies
         run: |
@@ -73,16 +69,17 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      - name: Build Cobalt Universal
+      - name: Build Cobalt
         run: |
+          # 确保这里的 -C 路径与 gn gen 的路径一致
           NINJA_STATUS="[%e sec | %f/%t %u remaining | %c/sec | j%r] "
-          # If your version of Cobalt supports it, this target bundles the ABIs
           ninja -C out/android-universal_gold cobalt_install
 
       - name: Upload Universal APK to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
+          # 确保路径一致
           file: out/android-universal_gold/cobalt.apk
           asset_name: cobalt-android-universal.apk
           tag: ${{ github.ref_name }}
