@@ -1,7 +1,7 @@
 name: android_release_universal
 
 on:
-  workflow_dispatch: # 允许手动触发
+  workflow_dispatch:
   push:
     tags:
       - 'v*'
@@ -26,11 +26,16 @@ jobs:
 
       - name: Set Android env vars
         run: |
-          export ANDROID_HOME="$GITHUB_WORKSPACE/Android"
-          mkdir -p "$ANDROID_HOME"
-          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-          unset ANDROID_SDK_ROOT
-          echo "ANDROID_SDK_ROOT=" >> $GITHUB_ENV
+          # 定义一个统一的 SDK 路径
+          export MY_ANDROID_HOME="$GITHUB_WORKSPACE/Android"
+          mkdir -p "$MY_ANDROID_HOME"
+          
+          # 核心修复：完全清空可能冲突的变量，并统一指向我们定义的路径
+          echo "ANDROID_HOME=$MY_ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$MY_ANDROID_HOME" >> $GITHUB_ENV
+          
+          # 告诉 Gradle 忽略系统自带的路径
+          unset ANDROID_SDK_HOME
 
       - name: Install GN
         run: |
@@ -44,8 +49,6 @@ jobs:
 
       - name: GN (Generate Config)
         run: |
-          # 统一输出目录名为 out/android-universal_gold
-          # 强制指定 target_cpu 为 arm64 以避免 x86 指令集冲突
           gn gen out/android-universal_gold --args='target_platform="android-arm64" target_os="android" target_cpu="arm64" build_type="gold" sb_api_version=15'
 
       - name: Install build dependencies
@@ -57,6 +60,7 @@ jobs:
             g++-multilib libc6-dev-i386
           ccache --max-size=20G
           bash ./starboard/tools/download_clang.sh
+          # 这里执行后可能会产生 SDK，我们通过前面的环境变量将其强制归位
           bash ./starboard/android/shared/download_sdk.sh
 
       - name: Ensure Android debug keystore exists
@@ -71,7 +75,9 @@ jobs:
 
       - name: Build Cobalt
         run: |
-          # 确保这里的 -C 路径与 gn gen 的路径一致
+          # 在执行 ninja 前再次确保环境变量一致
+          export ANDROID_HOME=$GITHUB_WORKSPACE/Android
+          export ANDROID_SDK_ROOT=$GITHUB_WORKSPACE/Android
           NINJA_STATUS="[%e sec | %f/%t %u remaining | %c/sec | j%r] "
           ninja -C out/android-universal_gold cobalt_install
 
@@ -79,7 +85,6 @@ jobs:
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          # 确保路径一致
           file: out/android-universal_gold/cobalt.apk
           asset_name: cobalt-android-universal.apk
           tag: ${{ github.ref_name }}
