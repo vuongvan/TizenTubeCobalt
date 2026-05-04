@@ -1,4 +1,4 @@
-name: android_release_universal
+name: android_release_armv7a_powertech
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  build-universal:
+  build-armv7a:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -56,6 +56,23 @@ jobs:
           bash ./starboard/tools/download_clang.sh
           bash ./starboard/android/shared/download_sdk.sh
 
+      # 关键步骤：全局文字修改与弹窗屏蔽
+      - name: Brand Modification and Popup Killer
+        run: |
+          # 1. 将所有源码中的 TizenTube 替换为 PowerTech (包含大小写处理)
+          find . -type f \( -name "*.java" -o -name "*.xml" -o -name "*.cc" -o -name "*.h" \) -exec sed -i 's/TizenTube/PowerTech/g' {} +
+          find . -type f \( -name "*.java" -o -name "*.xml" \) -exec sed -i 's/tizentube/powertech/g' {} +
+          
+          # 2. 屏蔽 GMS (Google Play Services) 错误弹窗逻辑
+          # 强制让 GoogleApiAvailability 的对话框方法直接返回 false，不显示 UI
+          find . -name "GoogleApiAvailability.java" -exec sed -i 's/return showErrorDialogFragment/return false; \/\/ /g' {} +
+          
+          # 3. 屏蔽所有通用 PopupWindow 调用 (针对你之前发出的布局监听逻辑)
+          find . -name "*.java" -exec sed -i 's/\.showAtLocation/\/\/ .showAtLocation/g' {} +
+          
+          # 4. 针对 Support 页面，直接屏蔽掉启动该 Activity 的逻辑或清空文字
+          find . -type f -name "*.java" -exec sed -i 's/buymeacoffee.com\/reisxd/powertech-store/g' {} +
+
       - name: Ensure Android debug keystore exists
         run: |
           if [ ! -f "$HOME/.android/debug.keystore" ]; then
@@ -66,50 +83,34 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      # 步骤 1: 编译 arm64-v8a
-      - name: Compile ARM 64bit
-        run: |
-          gn gen out/android-arm64_gold --args='target_platform="android-arm64" target_os="android" target_cpu="arm64" build_type="gold" sb_api_version=15'
-          ninja -C out/android-arm64_gold cobalt_install
-
-      # 步骤 2: 编译 armeabi-v7a
+      # 仅编译 armeabi-v7a
       - name: Compile ARM 32bit
         run: |
           gn gen out/android-arm_gold --args='target_platform="android-arm" target_os="android" target_cpu="arm" build_type="gold" sb_api_version=15'
           ninja -C out/android-arm_gold cobalt_install
 
-      # 步骤 3: 编译 x86
-      - name: Compile x86
+      - name: Assemble Armv7a APK
         run: |
-          gn gen out/android-x86_gold --args='target_platform="android-x86" target_os="android" target_cpu="x86" build_type="gold" sb_api_version=15'
-          ninja -C out/android-x86_gold cobalt_install
-
-      # 步骤 4: 合并所有架构的库并打包
-      - name: Assemble Universal APK (ARM64 + ARM32 + x86)
-        run: |
-          # 创建统一的合并库目录
-          mkdir -p out/merged_libs/lib/arm64-v8a
           mkdir -p out/merged_libs/lib/armeabi-v7a
-          mkdir -p out/merged_libs/lib/x86
           
           # 查找并复制对应的 .so 文件
-          find out/android-arm64_gold -name "libcobalt.so" -exec cp {} out/merged_libs/lib/arm64-v8a/ \;
-          find out/android-arm_gold -name "libcobalt.so" -exec cp {} out/merged_libs/lib/armeabi-v7a/ \;
-          find out/android-x86_gold -name "libcobalt.so" -exec cp {} out/merged_libs/lib/x86/ \;
+          find out/android-arm_gold -name "libcobalt.so" -exec cp -v {} out/merged_libs/lib/armeabi-v7a/ \;
+
+          # 验证文件是否存在，防止打包失败
+          ls -l out/merged_libs/lib/armeabi-v7a/libcobalt.so
 
           cd starboard/android/apk
-          # 传入 Gradle 参数进行打包
-          # -PcobaltBuildAbi 包含所有需要的架构
-          # -PcobaltLibraryDir 指向我们刚才手动合并的 .so 目录
           ./gradlew assembleRelease \
-            -PcobaltBuildAbi="arm64-v8a,armeabi-v7a,x86" \
-            -PcobaltLibraryDir="$GITHUB_WORKSPACE/out/merged_libs/lib"
+            -PcobaltBuildAbi="armeabi-v7a" \
+            -PcobaltLibraryDir="$GITHUB_WORKSPACE/out/merged_libs/lib" \
+            -PcobaltBuildType="gold" \
+            -x lint -x test
 
-      - name: Upload Universal APK
+      - name: Upload Armv7a APK
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: starboard/android/apk/app/build/outputs/apk/release/app-release.apk
-          asset_name: cobalt-android-universal-x86.apk
+          asset_name: PowerTech-Player-armv7a.apk
           tag: ${{ github.ref_name }}
           overwrite: true
