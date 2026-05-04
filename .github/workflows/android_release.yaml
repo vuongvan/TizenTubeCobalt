@@ -6,6 +6,10 @@ on:
     tags:
       - 'v*'
 
+env:
+  # 解决 Node.js 20 弃用警告
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-universal:
     runs-on: ubuntu-latest
@@ -14,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Cache Gradle
-        uses: actions/cache@v3
+        uses: actions/cache@v4 # 升级到 v4
         with:
           key: gradle-cache-${{ hashFiles('starboard/android/apk/**/*gradle*') }}
           path: |
@@ -26,16 +30,12 @@ jobs:
 
       - name: Set Android env vars
         run: |
-          # 定义一个统一的 SDK 路径
           export MY_ANDROID_HOME="$GITHUB_WORKSPACE/Android"
           mkdir -p "$MY_ANDROID_HOME"
-          
-          # 核心修复：完全清空可能冲突的变量，并统一指向我们定义的路径
           echo "ANDROID_HOME=$MY_ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$MY_ANDROID_HOME" >> $GITHUB_ENV
-          
-          # 告诉 Gradle 忽略系统自带的路径
-          unset ANDROID_SDK_HOME
+          # 禁用 Gradle Daemon 以防止孤立进程残留
+          echo "GRADLE_OPTS=-Dorg.gradle.daemon=false" >> $GITHUB_ENV
 
       - name: Install GN
         run: |
@@ -60,7 +60,6 @@ jobs:
             g++-multilib libc6-dev-i386
           ccache --max-size=20G
           bash ./starboard/tools/download_clang.sh
-          # 这里执行后可能会产生 SDK，我们通过前面的环境变量将其强制归位
           bash ./starboard/android/shared/download_sdk.sh
 
       - name: Ensure Android debug keystore exists
@@ -75,10 +74,10 @@ jobs:
 
       - name: Build Cobalt
         run: |
-          # 在执行 ninja 前再次确保环境变量一致
           export ANDROID_HOME=$GITHUB_WORKSPACE/Android
           export ANDROID_SDK_ROOT=$GITHUB_WORKSPACE/Android
           NINJA_STATUS="[%e sec | %f/%t %u remaining | %c/sec | j%r] "
+          # 加上终端类型参数有助于日志清晰
           ninja -C out/android-universal_gold cobalt_install
 
       - name: Upload Universal APK to release
