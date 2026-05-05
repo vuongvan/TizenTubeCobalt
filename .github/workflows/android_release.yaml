@@ -56,32 +56,22 @@ jobs:
           bash ./starboard/tools/download_clang.sh
           bash ./starboard/android/shared/download_sdk.sh
 
-      # 核心逻辑修改：改名、去弹窗、禁更新
       - name: Precise Modification and Disable Updates
         run: |
-          echo "Applying power-user modifications..."
-          
-          # 1. 屏蔽 GMS 弹窗（解决非认证设备报错）
+          echo "Applying modifications..."
+          # 屏蔽 GMS 弹窗
           find . -name "GoogleApiAvailability.java" -exec sed -i 's/return showErrorDialogFragment/return false; \/\/ /g' {} +
-          
-          # 2. 彻底取消自动更新检查
-          # 屏蔽 Java 层的更新检查逻辑，让 checkUpdate 相关方法失效
+          # 取消更新逻辑
           find . -type f -name "*.java" -exec sed -i 's/checkUpdate/disableUpdate/g' {} +
           find . -type f -name "*.java" -exec sed -i 's/isUpdateAvailable/false \/\/ /g' {} +
-          # 针对 Cobalt 的 H5vcc 更新检查进行屏蔽
           find . -type f -name "*.cc" -exec sed -i 's/updater_->CheckForUpdate()/ \/\/ updater_->CheckForUpdate()/g' {} +
-
-          # 3. 屏蔽所有通用 PopupWindow 显示（防止各种弹窗骚扰）
+          # 屏蔽弹窗 UI
           find . -name "*.java" -exec sed -i 's/\.showAtLocation/\/\/ .showAtLocation/g' {} +
-
-          # 4. 品牌更名：仅针对用户可见的 Java 和 XML 资源
+          # 品牌更名
           find . -type f \( -name "*.java" -o -name "*.xml" \) -exec sed -i 's/TizenTube/PowerTech/g' {} +
           find . -type f \( -name "*.java" -o -name "*.xml" \) -exec sed -i 's/tizentube/powertech/g' {} +
-
-          # 5. 替换捐赠/支持链接
+          # 捐赠链接
           find . -type f -name "*.java" -exec sed -i 's/buymeacoffee.com\/reisxd/powertech-store/g' {} +
-          
-          echo "All modifications completed."
 
       - name: Ensure Android debug keystore exists
         run: |
@@ -93,24 +83,25 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      # 仅编译 armeabi-v7a (32bit)
       - name: Compile ARM 32bit
         run: |
           gn gen out/android-arm_gold --args='target_platform="android-arm" target_os="android" target_cpu="arm" build_type="gold" sb_api_version=15'
           ninja -C out/android-arm_gold cobalt_install
 
-      # 打包步骤
       - name: Assemble Armv7a APK
         run: |
-          mkdir -p out/merged_libs/lib/armeabi-v7a
+          # 1. 核心修复：创建扁平化的库目录，直接把 .so 放在 lib/ 下
+          # 这样做是为了匹配 Gradle 报错中期待的路径
+          mkdir -p out/merged_libs/lib
           
-          # 拷贝 libcobalt.so
-          find out/android-arm_gold -name "libcobalt.so" -exec cp -v {} out/merged_libs/lib/armeabi-v7a/ \;
+          # 2. 搜索并拷贝 libcobalt.so 到 lib 根目录
+          find out/android-arm_gold -name "libcobalt.so" -exec cp -v {} out/merged_libs/lib/ \;
 
-          # 检查文件
-          ls -l out/merged_libs/lib/armeabi-v7a/libcobalt.so
+          # 3. 校验
+          ls -l out/merged_libs/lib/libcobalt.so
 
           cd starboard/android/apk
+          # 使用 -PcobaltLibraryDir 指向包含 .so 的直接父目录
           ./gradlew assembleRelease \
             -PcobaltBuildAbi="armeabi-v7a" \
             -PcobaltLibraryDir="$GITHUB_WORKSPACE/out/merged_libs/lib" \
@@ -122,6 +113,6 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: starboard/android/apk/app/build/outputs/apk/release/app-release.apk
-          asset_name: PowerTech-NoUpdate-armv7a.apk
+          asset_name: PowerTech-Player-armv7a.apk
           tag: ${{ github.ref_name }}
           overwrite: true
