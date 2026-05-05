@@ -38,26 +38,33 @@ jobs:
           bash ./starboard/tools/download_clang.sh
           bash ./starboard/android/shared/download_sdk.sh
 
-      - name: PowerTech Deep Modifications
+      - name: PowerTech Total War (Deep JS & GMS Modifications)
         run: |
-          echo "Starting deep modification..."
+          echo "Starting Total War on Web UI and GMS..."
           
-          # 1. 彻底禁用更新逻辑：让所有更新检查直接返回 false
+          # 1. 【核心：全方位 UI 改名】针对所有 Web 资源文件进行全面替换
+          # 范围包括：Java, XML, .js (JavaScript), .html, .json (配置文件), .grd (Chromium 资源)
+          echo "Replacing TizenTube with PowerTech in JS/HTML/JSON..."
+          # 区分大小写的两种替换，确保全面
+          find . -type f \( -name "*.java" -o -name "*.xml" -o -name "*.js" -o -name "*.html" -o -name "*.json" -o -name "*.grd" -o -name "*.grdp" -o -name "*.strings" \) -exec sed -i 's/TizenTube/PowerTech/g' {} +
+          find . -type f \( -name "*.java" -o -name "*.xml" -o -name "*.js" -o -name "*.html" -o -name "*.json" -o -name "*.grd" -o -name "*.grdp" -o -name "*.strings" \) -exec sed -i 's/tizentube/powertech/g' {} +
+
+          # 2. 【彻底去更新：拦截 GMS 和原生逻辑】
+          echo "Disabling Native Updates and GMS popups..."
+          # 镂空 Java 更新检查类
           find . -type f -name "*.java" -exec sed -i 's/public boolean isUpdateAvailable/public boolean isUpdateAvailable() { return false; } \/\/ /g' {} +
+          # 禁用原生更新入口
           find . -type f -name "*.java" -exec sed -i 's/checkUpdate/disableUpdate/g' {} +
-          find . -type f -name "*.cc" -exec sed -i 's/updater_->CheckForUpdate()/ \/* disabled *\/ /g' {} +
-
-          # 2. 屏蔽 GMS 和各种弹窗
+          # 彻底屏蔽 GMS 弹窗（解决登录验证失败导致的弹窗）
           find . -name "GoogleApiAvailability.java" -exec sed -i 's/return showErrorDialogFragment/return false; \/\/ /g' {} +
-          find . -name "*.java" -exec sed -i 's/\.showAtLocation/\/\/ .showAtLocation/g' {} +
-
-          # 3. 品牌重塑：不仅改 Java/XML，还要修改 .grd, .js, .json (Cobalt UI 核心)
-          # 注意：这里采用了区分大小写的两种替换
-          find . -type f \( -name "*.java" -o -name "*.xml" -o -name "*.grd" -o -name "*.grdp" -o -name "*.js" -o -name "*.json" \) -exec sed -i 's/TizenTube/PowerTech/g' {} +
-          find . -type f \( -name "*.java" -o -name "*.xml" -o -name "*.grd" -o -name "*.grdp" -o -name "*.js" -o -name "*.json" \) -exec sed -i 's/tizentube/powertech/g' {} +
-
-          # 4. 修改应用包名显示（针对 strings.xml）
-          find . -name "strings.xml" -exec sed -i 's/TizenTube/PowerTech/g' {} +
+          
+          # 3. 【新改动：彻底去弹窗：镂空 Java 对话框方法】
+          # 针对可能被 JS 触发的原生弹窗进行拦截
+          echo "Disabling Native Dialogs..."
+          find . -name "*.java" -exec sed -i 's/showAtLocation/\/\/ showAtLocation/g' {} +
+          
+          # 4. 【深层：镂空 C++ 更新检查】
+          find . -type f -name "*.cc" -exec sed -i 's/updater_->CheckForUpdate()/ \/* disabled *\/ /g' {} +
 
       - name: Ensure Android debug keystore
         run: |
@@ -69,14 +76,14 @@ jobs:
 
       - name: GN (Generate Armv7a Config)
         run: |
-          # 核心：增加 sb_evergreen_compatible_package=false 彻底切断自动更新机制
+          # 彻底切断自动更新 Evergreen 机制
           gn gen out/android-armv7a_gold --args='target_platform="android-arm" target_os="android" target_cpu="arm" build_type="gold" sb_api_version=15 sb_evergreen_compatible_package=false'
 
       - name: Build Cobalt (Ninja)
         run: |
           export ANDROID_HOME=$GITHUB_WORKSPACE/Android
           export ANDROID_SDK_ROOT=$GITHUB_WORKSPACE/Android
-          # 编译前清理缓存，确保修改生效
+          # 编译前强制清理缓存，确保修改生效
           ninja -C out/android-armv7a_gold -t clean
           ninja -C out/android-armv7a_gold cobalt_install
 
