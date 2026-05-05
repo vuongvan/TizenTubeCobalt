@@ -1,36 +1,90 @@
-      name: PowerTech Precise Modifications
+name: android_release_armv7a_powertech
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-armv7a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set Android env vars
+        run: |
+          export MY_ANDROID_HOME="$GITHUB_WORKSPACE/Android"
+          mkdir -p "$MY_ANDROID_HOME"
+          echo "ANDROID_HOME=$MY_ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$MY_ANDROID_HOME" >> $GITHUB_ENV
+
+      - name: Install GN & Dependencies
+        run: |
+          sudo apt update && sudo apt install -qqy --no-install-recommends \
+            bison clang libasound2-dev libgles2-mesa-dev libglib2.0-dev \
+            libxcomposite-dev libxi-dev libxrender-dev nasm ninja-build \
+            python3-venv ccache gcc-multilib g++-multilib libc6-dev-i386 unzip
+          wget https://chrome-infra-packages.appspot.com/dl/gn/gn/linux-amd64/+/latest -O gn.zip
+          unzip gn.zip -d gn_bin && sudo mv gn_bin/gn /usr/local/bin/gn && sudo chmod +x /usr/local/bin/gn
+          echo "PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH" >> $GITHUB_ENV
+
+      - name: Download SDK & Clang
+        run: |
+          bash ./starboard/tools/download_clang.sh
+          bash ./starboard/android/shared/download_sdk.sh
+
+      - name: PowerTech Deep Modifications
         run: |
           echo "Starting deep modification..."
           
-          # 1. 【彻底去更新】拦截所有更新检查的入口，直接返回 false 或空
-          # 针对 Java 层
+          # 1. 彻底禁用更新逻辑：让所有更新检查直接返回 false
           find . -type f -name "*.java" -exec sed -i 's/public boolean isUpdateAvailable/public boolean isUpdateAvailable() { return false; } \/\/ /g' {} +
           find . -type f -name "*.java" -exec sed -i 's/checkUpdate/disableUpdate/g' {} +
-          # 针对 C++ 层 (底层拦截)
           find . -type f -name "*.cc" -exec sed -i 's/updater_->CheckForUpdate()/ \/* disabled *\/ /g' {} +
 
-          # 2. 【彻底去弹窗】直接让显示对话框的方法失效
-          # 找到负责显示对话框的入口并让它直接返回
-          find . -name "Dialog.java" -o -name "PopupWindow.java" | xargs sed -i 's/show()/dismiss() \/\/ /g'
-
-          # 3. 【UI 全局改名】针对所有资源文件和布局文件进行暴力替换
-          # 增加对 .grd (Chromium 资源文件) 的修改，因为 Cobalt 很多文字在这些文件里
-          find . -type f \( -name "*.java" -o -name "*.xml" -o -name "*.grd" -o -name "*.grdp" -o -name "*.strings" \) -exec sed -i 's/TizenTube/PowerTech/g' {} +
-          find . -type f \( -name "*.java" -o -name "*.xml" -o -name "*.grd" -o -name "*.grdp" -o -name "*.strings" \) -exec sed -i 's/tizentube/powertech/g' {} +
-
-          # 4. 【解决更新弹窗的具体 ID】针对 Cobalt 常见的更新提示 ID 进行拦截
-          # 强制修改 GMS 验证，防止因“版本过旧”弹窗
+          # 2. 屏蔽 GMS 和各种弹窗
           find . -name "GoogleApiAvailability.java" -exec sed -i 's/return showErrorDialogFragment/return false; \/\/ /g' {} +
-          
-          echo "Deep modifications applied."
+          find . -name "*.java" -exec sed -i 's/\.showAtLocation/\/\/ .showAtLocation/g' {} +
+
+          # 3. 品牌重塑：不仅改 Java/XML，还要修改 .grd, .js, .json (Cobalt UI 核心)
+          # 注意：这里采用了区分大小写的两种替换
+          find . -type f \( -name "*.java" -o -name "*.xml" -o -name "*.grd" -o -name "*.grdp" -o -name "*.js" -o -name "*.json" \) -exec sed -i 's/TizenTube/PowerTech/g' {} +
+          find . -type f \( -name "*.java" -o -name "*.xml" -o -name "*.grd" -o -name "*.grdp" -o -name "*.js" -o -name "*.json" \) -exec sed -i 's/tizentube/powertech/g' {} +
+
+          # 4. 修改应用包名显示（针对 strings.xml）
+          find . -name "strings.xml" -exec sed -i 's/TizenTube/PowerTech/g' {} +
+
+      - name: Ensure Android debug keystore
+        run: |
+          mkdir -p "$HOME/.android"
+          keytool -genkey -v -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
 
       - name: GN (Generate Armv7a Config)
         run: |
-          # 增加一个参数强制不使用 Evergreen 更新机制
+          # 核心：增加 sb_evergreen_compatible_package=false 彻底切断自动更新机制
           gn gen out/android-armv7a_gold --args='target_platform="android-arm" target_os="android" target_cpu="arm" build_type="gold" sb_api_version=15 sb_evergreen_compatible_package=false'
 
       - name: Build Cobalt (Ninja)
         run: |
-          # 编译前先清理掉可能存在的旧资源缓存
+          export ANDROID_HOME=$GITHUB_WORKSPACE/Android
+          export ANDROID_SDK_ROOT=$GITHUB_WORKSPACE/Android
+          # 编译前清理缓存，确保修改生效
           ninja -C out/android-armv7a_gold -t clean
           ninja -C out/android-armv7a_gold cobalt_install
+
+      - name: Upload PowerTech APK
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: out/android-armv7a_gold/cobalt.apk
+          asset_name: PowerTech-Player-armv7a.apk
+          tag: main
+          overwrite: true
