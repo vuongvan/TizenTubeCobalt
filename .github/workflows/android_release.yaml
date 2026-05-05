@@ -59,18 +59,13 @@ jobs:
       - name: Precise Modification and Disable Updates
         run: |
           echo "Applying modifications..."
-          # 屏蔽 GMS 弹窗
           find . -name "GoogleApiAvailability.java" -exec sed -i 's/return showErrorDialogFragment/return false; \/\/ /g' {} +
-          # 取消更新逻辑
           find . -type f -name "*.java" -exec sed -i 's/checkUpdate/disableUpdate/g' {} +
           find . -type f -name "*.java" -exec sed -i 's/isUpdateAvailable/false \/\/ /g' {} +
           find . -type f -name "*.cc" -exec sed -i 's/updater_->CheckForUpdate()/ \/\/ updater_->CheckForUpdate()/g' {} +
-          # 屏蔽弹窗 UI
           find . -name "*.java" -exec sed -i 's/\.showAtLocation/\/\/ .showAtLocation/g' {} +
-          # 品牌更名
           find . -type f \( -name "*.java" -o -name "*.xml" \) -exec sed -i 's/TizenTube/PowerTech/g' {} +
           find . -type f \( -name "*.java" -o -name "*.xml" \) -exec sed -i 's/tizentube/powertech/g' {} +
-          # 捐赠链接
           find . -type f -name "*.java" -exec sed -i 's/buymeacoffee.com\/reisxd/powertech-store/g' {} +
 
       - name: Ensure Android debug keystore exists
@@ -90,29 +85,25 @@ jobs:
 
       - name: Assemble Armv7a APK
         run: |
-          # 1. 核心修复：创建扁平化的库目录，直接把 .so 放在 lib/ 下
-          # 这样做是为了匹配 Gradle 报错中期待的路径
           mkdir -p out/merged_libs/lib
-          
-          # 2. 搜索并拷贝 libcobalt.so 到 lib 根目录
           find out/android-arm_gold -name "libcobalt.so" -exec cp -v {} out/merged_libs/lib/ \;
-
-          # 3. 校验
-          ls -l out/merged_libs/lib/libcobalt.so
-
+          
           cd starboard/android/apk
-          # 使用 -PcobaltLibraryDir 指向包含 .so 的直接父目录
           ./gradlew assembleRelease \
             -PcobaltBuildAbi="armeabi-v7a" \
             -PcobaltLibraryDir="$GITHUB_WORKSPACE/out/merged_libs/lib" \
             -PcobaltBuildType="gold" \
             -x lint -x test
 
+      # 关键修复：自动寻找并上传生成的 APK
       - name: Upload Armv7a APK
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: starboard/android/apk/app/build/outputs/apk/release/app-release.apk
+          # 使用通配符寻找生成的任意 APK 文件
+          file: starboard/android/apk/app/build/outputs/apk/**/*.apk
+          file_glob: true
           asset_name: PowerTech-Player-armv7a.apk
+          # 确保上传到你指定的 tag
           tag: ${{ github.ref_name }}
           overwrite: true
