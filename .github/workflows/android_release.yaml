@@ -16,17 +16,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          key: gradle-cache-${{ hashFiles('starboard/android/apk/**/*gradle*') }}
-          path: |
-            /root/.gradle/caches
-            /root/.gradle/wrapper
-
-      - name: Set up Cloud SDK
-        uses: isarkis/setup-gcloud@40dce7857b354839efac498d3632050f568090b6
-
       - name: Set Android env vars
         run: |
           export MY_ANDROID_HOME="$GITHUB_WORKSPACE/Android"
@@ -35,30 +24,20 @@ jobs:
           echo "ANDROID_SDK_ROOT=$MY_ANDROID_HOME" >> $GITHUB_ENV
           echo "GRADLE_OPTS=-Dorg.gradle.daemon=false" >> $GITHUB_ENV
 
-      - name: Install GN
-        run: |
-          wget https://chrome-infra-packages.appspot.com/dl/gn/gn/linux-amd64/+/latest -O gn.zip
-          unzip gn.zip -d gn_bin
-          sudo mv gn_bin/gn /usr/local/bin/gn
-          sudo chmod +x /usr/local/bin/gn
-
-      - name: Set PYTHONPATH
-        run: echo "PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH" >> $GITHUB_ENV
-
       - name: Install build dependencies
         run: |
           sudo apt update && sudo apt install -qqy --no-install-recommends \
             bison clang libasound2-dev libgles2-mesa-dev libglib2.0-dev \
             libxcomposite-dev libxi-dev libxrender-dev nasm ninja-build \
-            python3-venv ccache gcc-multilib \
-            g++-multilib libc6-dev-i386
-          ccache --max-size=20G
+            python3-venv ccache gcc-multilib g++-multilib libc6-dev-i386 unzip
+          wget https://chrome-infra-packages.appspot.com/dl/gn/gn/linux-amd64/+/latest -O gn.zip
+          unzip gn.zip -d gn_bin && sudo mv gn_bin/gn /usr/local/bin/gn && sudo chmod +x /usr/local/bin/gn
+          echo "PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH" >> $GITHUB_ENV
           bash ./starboard/tools/download_clang.sh
           bash ./starboard/android/shared/download_sdk.sh
 
-      - name: Precise Modification and Disable Updates
+      - name: Precise Modification
         run: |
-          echo "Applying modifications..."
           find . -name "GoogleApiAvailability.java" -exec sed -i 's/return showErrorDialogFragment/return false; \/\/ /g' {} +
           find . -type f -name "*.java" -exec sed -i 's/checkUpdate/disableUpdate/g' {} +
           find . -type f -name "*.java" -exec sed -i 's/isUpdateAvailable/false \/\/ /g' {} +
@@ -66,17 +45,11 @@ jobs:
           find . -name "*.java" -exec sed -i 's/\.showAtLocation/\/\/ .showAtLocation/g' {} +
           find . -type f \( -name "*.java" -o -name "*.xml" \) -exec sed -i 's/TizenTube/PowerTech/g' {} +
           find . -type f \( -name "*.java" -o -name "*.xml" \) -exec sed -i 's/tizentube/powertech/g' {} +
-          find . -type f -name "*.java" -exec sed -i 's/buymeacoffee.com\/reisxd/powertech-store/g' {} +
 
-      - name: Ensure Android debug keystore exists
+      - name: Ensure Keystore
         run: |
-          if [ ! -f "$HOME/.android/debug.keystore" ]; then
-            mkdir -p "$HOME/.android"
-            keytool -genkey -v -keystore "$HOME/.android/debug.keystore" \
-              -storepass android -alias androiddebugkey -keypass android \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-          fi
+          mkdir -p "$HOME/.android"
+          keytool -genkey -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" || true
 
       - name: Compile ARM 32bit
         run: |
@@ -85,25 +58,38 @@ jobs:
 
       - name: Assemble Armv7a APK
         run: |
-          mkdir -p out/merged_libs/lib
-          find out/android-arm_gold -name "libcobalt.so" -exec cp -v {} out/merged_libs/lib/ \;
+          # 建立绝对干净的 SO 库目录
+          rm -rf out/merged_libs
+          mkdir -p out/merged_libs/lib/armeabi-v7a
+          
+          # 搜刮所有 libcobalt.so 并放入标准 NDK 路径
+          find out/android-arm_gold -name "libcobalt.so" -exec cp -v {} out/merged_libs/lib/armeabi-v7a/ \;
           
           cd starboard/android/apk
+          # 赋予执行权限并清理
+          chmod +x gradlew
+          ./gradlew clean
+          
+          # 执行打包，显式传递 ABI 路径
           ./gradlew assembleRelease \
             -PcobaltBuildAbi="armeabi-v7a" \
             -PcobaltLibraryDir="$GITHUB_WORKSPACE/out/merged_libs/lib" \
             -PcobaltBuildType="gold" \
             -x lint -x test
 
-      # 关键修复：自动寻找并上传生成的 APK
-      - name: Upload Armv7a APK
+      - name: Locate APK
+        id: locate_apk
+        run: |
+          # 寻找生成的 APK 并保存到环境变量，供下一步使用
+          APK_PATH=$(find starboard/android/apk/app/build/outputs/apk -name "*.apk" | head -n 1)
+          echo "APK_FILE=$APK_PATH" >> $GITHUB_ENV
+          echo "Found APK at: $APK_PATH"
+
+      - name: Upload Release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          # 使用通配符寻找生成的任意 APK 文件
-          file: starboard/android/apk/app/build/outputs/apk/**/*.apk
-          file_glob: true
+          file: ${{ env.APK_FILE }}
           asset_name: PowerTech-Player-armv7a.apk
-          # 确保上传到你指定的 tag
           tag: ${{ github.ref_name }}
           overwrite: true
