@@ -16,15 +16,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set Android env vars
+      - name: Set Android env
         run: |
           export MY_ANDROID_HOME="$GITHUB_WORKSPACE/Android"
           mkdir -p "$MY_ANDROID_HOME"
           echo "ANDROID_HOME=$MY_ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$MY_ANDROID_HOME" >> $GITHUB_ENV
-          echo "GRADLE_OPTS=-Dorg.gradle.daemon=false" >> $GITHUB_ENV
 
-      - name: Install build dependencies
+      - name: Install Dependencies
         run: |
           sudo apt update && sudo apt install -qqy --no-install-recommends \
             bison clang libasound2-dev libgles2-mesa-dev libglib2.0-dev \
@@ -36,60 +35,49 @@ jobs:
           bash ./starboard/tools/download_clang.sh
           bash ./starboard/android/shared/download_sdk.sh
 
-      - name: Precise Modification
+      - name: PowerTech Modifications
         run: |
+          # 屏蔽弹窗与检查
           find . -name "GoogleApiAvailability.java" -exec sed -i 's/return showErrorDialogFragment/return false; \/\/ /g' {} +
           find . -type f -name "*.java" -exec sed -i 's/checkUpdate/disableUpdate/g' {} +
           find . -type f -name "*.java" -exec sed -i 's/isUpdateAvailable/false \/\/ /g' {} +
           find . -type f -name "*.cc" -exec sed -i 's/updater_->CheckForUpdate()/ \/\/ updater_->CheckForUpdate()/g' {} +
           find . -name "*.java" -exec sed -i 's/\.showAtLocation/\/\/ .showAtLocation/g' {} +
+          # 品牌重塑 (仅 Java/XML)
           find . -type f \( -name "*.java" -o -name "*.xml" \) -exec sed -i 's/TizenTube/PowerTech/g' {} +
-          find . -type f \( -name "*.java" -o -name "*.xml" \) -exec sed -i 's/tizentube/powertech/g' {} +
-
-      - name: Ensure Keystore
-        run: |
-          mkdir -p "$HOME/.android"
-          keytool -genkey -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" || true
 
       - name: Compile ARM 32bit
         run: |
           gn gen out/android-arm_gold --args='target_platform="android-arm" target_os="android" target_cpu="arm" build_type="gold" sb_api_version=15'
           ninja -C out/android-arm_gold cobalt_install
 
-      - name: Assemble Armv7a APK
+      - name: Assemble APK
         run: |
-          # 建立绝对干净的 SO 库目录
-          rm -rf out/merged_libs
+          # --- 核心修复步骤 ---
+          # 1. 清理并创建多层级路径，以防 CMake 或 Gradle 找不到
           mkdir -p out/merged_libs/lib/armeabi-v7a
           
-          # 搜刮所有 libcobalt.so 并放入标准 NDK 路径
-          find out/android-arm_gold -name "libcobalt.so" -exec cp -v {} out/merged_libs/lib/armeabi-v7a/ \;
+          # 2. 将 libcobalt.so 复制到两个位置：
+          # 位置 A: merged_libs/lib/libcobalt.so (供 CMake 寻找)
+          # 位置 B: merged_libs/lib/armeabi-v7a/libcobalt.so (供 Gradle 寻找)
+          find out/android-arm_gold -name "libcobalt.so" -exec cp -v {} out/merged_libs/lib/ \;
+          cp -v out/merged_libs/lib/libcobalt.so out/merged_libs/lib/armeabi-v7a/
           
+          # 3. 开始打包
           cd starboard/android/apk
-          # 赋予执行权限并清理
-          chmod +x gradlew
           ./gradlew clean
-          
-          # 执行打包，显式传递 ABI 路径
           ./gradlew assembleRelease \
             -PcobaltBuildAbi="armeabi-v7a" \
             -PcobaltLibraryDir="$GITHUB_WORKSPACE/out/merged_libs/lib" \
             -PcobaltBuildType="gold" \
             -x lint -x test
 
-      - name: Locate APK
-        id: locate_apk
-        run: |
-          # 寻找生成的 APK 并保存到环境变量，供下一步使用
-          APK_PATH=$(find starboard/android/apk/app/build/outputs/apk -name "*.apk" | head -n 1)
-          echo "APK_FILE=$APK_PATH" >> $GITHUB_ENV
-          echo "Found APK at: $APK_PATH"
-
-      - name: Upload Release
+      - name: Upload APK
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ env.APK_FILE }}
-          asset_name: PowerTech-Player-armv7a.apk
-          tag: ${{ github.ref_name }}
+          file: starboard/android/apk/app/build/outputs/apk/**/release/*.apk
+          file_glob: true
+          asset_name: PowerTech-armv7a.apk
+          tag: main
           overwrite: true
