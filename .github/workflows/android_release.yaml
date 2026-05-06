@@ -1,4 +1,4 @@
-name: android_release_armv7a_powertech
+name: android_release_x86_powertech_pure
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  build-armv7a:
+  build-x86:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -38,33 +38,46 @@ jobs:
           bash ./starboard/tools/download_clang.sh
           bash ./starboard/android/shared/download_sdk.sh
 
-      - name: PowerTech Total War (Deep JS & GMS Modifications)
+      - name: PowerTech Deep Modifications (Deep Smali & Logo Replacement)
         run: |
-          echo "Starting Total War on Web UI and GMS..."
+          echo "Starting Deep Sterilization of Updates and Dialogs..."
           
-          # 1. 【核心：全方位 UI 改名】针对所有 Web 资源文件进行全面替换
-          # 范围包括：Java, XML, .js (JavaScript), .html, .json (配置文件), .grd (Chromium 资源)
-          echo "Replacing TizenTube with PowerTech in JS/HTML/JSON..."
-          # 区分大小写的两种替换，确保全面
-          find . -type f \( -name "*.java" -o -name "*.xml" -o -name "*.js" -o -name "*.html" -o -name "*.json" -o -name "*.grd" -o -name "*.grdp" -o -name "*.strings" \) -exec sed -i 's/TizenTube/PowerTech/g' {} +
-          find . -type f \( -name "*.java" -o -name "*.xml" -o -name "*.js" -o -name "*.html" -o -name "*.json" -o -name "*.grd" -o -name "*.grdp" -o -name "*.strings" \) -exec sed -i 's/tizentube/powertech/g' {} +
+          # ==============================================================================
+          # 1. 【彻底去弹窗 & 去更新】Smali 镂空打击 (针对 Java 层编译后的代码)
+          # 此操作将删除函数体，强制返回，彻底废除功能。
+          # ==============================================================================
+          
+          # 拦截所有基于 PopupWindow 的弹窗 (通常用于显示 You're signed out)
+          find . -name "*.java" -exec sed -i '/void showAtLocation/,/}/c\    public void showAtLocation(android.view.View parent, int gravity, int x, int y) { return; }' {} +
+          
+          # 拦截所有基于 Dialog 的弹窗 (通常用于更新提示)
+          find . -name "*.java" -exec sed -i '/void show()/,/}/c\    public void show() { return; }' {} +
 
-          # 2. 【彻底去更新：拦截 GMS 和原生逻辑】
-          echo "Disabling Native Updates and GMS popups..."
-          # 镂空 Java 更新检查类
-          find . -type f -name "*.java" -exec sed -i 's/public boolean isUpdateAvailable/public boolean isUpdateAvailable() { return false; } \/\/ /g' {} +
-          # 禁用原生更新入口
-          find . -type f -name "*.java" -exec sed -i 's/checkUpdate/disableUpdate/g' {} +
-          # 彻底屏蔽 GMS 弹窗（解决登录验证失败导致的弹窗）
+          # 彻底镂空 TizenTube 自定义的更新检查类
+          # 强制让 isUpdateAvailable 永远返回 false
+          find . -type f -name "*.java" -exec sed -i '/public boolean isUpdateAvailable/,/}/c\    public boolean isUpdateAvailable() { return false; }' {} +
+
+          # 屏蔽 GMS 弹窗
           find . -name "GoogleApiAvailability.java" -exec sed -i 's/return showErrorDialogFragment/return false; \/\/ /g' {} +
+
+          # ==============================================================================
+          # 2. 【品牌修改：由于 UI 远程加载无法修改文字，这里强制替换 Logo 图片】
+          # 我们将用一个通用的 PowerTech 风格图标替换 TizenTube 安全盾牌
+          # ==============================================================================
+          echo "Replacing TizenTube Logo with PowerTech Logo..."
           
-          # 3. 【新改动：彻底去弹窗：镂空 Java 对话框方法】
-          # 针对可能被 JS 触发的原生弹窗进行拦截
-          echo "Disabling Native Dialogs..."
-          find . -name "*.java" -exec sed -i 's/showAtLocation/\/\/ showAtLocation/g' {} +
-          
-          # 4. 【深层：镂空 C++ 更新检查】
-          find . -type f -name "*.cc" -exec sed -i 's/updater_->CheckForUpdate()/ \/* disabled *\/ /g' {} +
+          # 创建一个简单的 PowerTech Logo (这里用一段文本代替图标，实际操作中建议准备好 png 文件)
+          # 注意：这里需要你准备一个名为 powertech_logo.png 的文件在仓库根目录
+          # 如果没有文件，这里会报错停止。为了 Action 运行，我这里改为“如果存在则替换”。
+          if [ -f "powertech_logo.png" ]; then
+            find . -name "splash_logo.png" -exec cp -v "powertech_logo.png" {} \;
+            find . -name "ic_launcher.png" -exec cp -v "powertech_logo.png" {} \;
+          else
+            echo "Warning: powertech_logo.png not found in repository root. Application icon will NOT be replaced."
+          fi
+
+          # 全局替换 strings.xml 里的名字，至少确保应用安装时的名字是 PowerTech
+          find . -name "strings.xml" -exec sed -i 's/TizenTube/PowerTech/g' {} +
 
       - name: Ensure Android debug keystore
         run: |
@@ -74,24 +87,25 @@ jobs:
             -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: GN (Generate Armv7a Config)
+      - name: GN (Generate x86 Config)
         run: |
-          # 彻底切断自动更新 Evergreen 机制
-          gn gen out/android-armv7a_gold --args='target_platform="android-arm" target_os="android" target_cpu="arm" build_type="gold" sb_api_version=15 sb_evergreen_compatible_package=false'
+          # 核心修改：target_cpu="x86" (32位 x86)
+          # 彻底切断 Evergreen
+          gn gen out/android-x86_gold --args='target_platform="android-x86" target_os="android" target_cpu="x86" build_type="gold" sb_api_version=15 sb_evergreen_compatible_package=false'
 
-      - name: Build Cobalt (Ninja)
+      - name: Build Cobalt x86 (Ninja)
         run: |
           export ANDROID_HOME=$GITHUB_WORKSPACE/Android
           export ANDROID_SDK_ROOT=$GITHUB_WORKSPACE/Android
-          # 编译前强制清理缓存，确保修改生效
-          ninja -C out/android-armv7a_gold -t clean
-          ninja -C out/android-armv7a_gold cobalt_install
+          # 清理缓存
+          ninja -C out/android-x86_gold -t clean
+          ninja -C out/android-x86_gold cobalt_install
 
-      - name: Upload PowerTech APK
+      - name: Upload PowerTech x86 APK
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: out/android-armv7a_gold/cobalt.apk
-          asset_name: PowerTech-Player-armv7a.apk
+          file: out/android-x86_gold/cobalt.apk
+          asset_name: PowerTech-Player-x86.apk
           tag: main
           overwrite: true
