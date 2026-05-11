@@ -1,0 +1,97 @@
+name: android_release_armv7a_powertech
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-armv7a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set Android env vars
+        run: |
+          export MY_ANDROID_HOME="$GITHUB_WORKSPACE/Android"
+          mkdir -p "$MY_ANDROID_HOME"
+          echo "ANDROID_HOME=$MY_ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$MY_ANDROID_HOME" >> $GITHUB_ENV
+
+      - name: Install GN & Dependencies
+        run: |
+          sudo apt update && sudo apt install -qqy --no-install-recommends \
+            bison clang libasound2-dev libgles2-mesa-dev libglib2.0-dev \
+            libxcomposite-dev libxi-dev libxrender-dev nasm ninja-build \
+            python3-venv ccache gcc-multilib g++-multilib libc6-dev-i386 unzip
+          wget https://chrome-infra-packages.appspot.com/dl/gn/gn/linux-amd64/+/latest -O gn.zip
+          unzip gn.zip -d gn_bin && sudo mv gn_bin/gn /usr/local/bin/gn && sudo chmod +x /usr/local/bin/gn
+          echo "PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH" >> $GITHUB_ENV
+
+      - name: Download SDK & Clang
+        run: |
+          bash ./starboard/tools/download_clang.sh
+          bash ./starboard/android/shared/download_sdk.sh
+
+      - name: PowerTech Total War (Deep JS & GMS Modifications)
+        run: |
+          echo "Starting Total War on Web UI and GMS..."
+          
+          # 1. 【核心：全方位 UI 改名】针对所有 Web 资源文件进行全面替换
+          # 范围包括：Java, XML, .js (JavaScript), .html, .json (配置文件), .grd (Chromium 资源)
+          echo "Replacing TizenTube with PowerTech in JS/HTML/JSON..."
+          # 区分大小写的两种替换，确保全面
+          find . -type f \( -name "*.java" -o -name "*.xml" -o -name "*.js" -o -name "*.html" -o -name "*.json" -o -name "*.grd" -o -name "*.grdp" -o -name "*.strings" \) -exec sed -i 's/TizenTube/PowerTech/g' {} +
+          find . -type f \( -name "*.java" -o -name "*.xml" -o -name "*.js" -o -name "*.html" -o -name "*.json" -o -name "*.grd" -o -name "*.grdp" -o -name "*.strings" \) -exec sed -i 's/tizentube/powertech/g' {} +
+
+          # 2. 【彻底去更新：拦截 GMS 和原生逻辑】
+          echo "Disabling Native Updates and GMS popups..."
+          # 镂空 Java 更新检查类
+          find . -type f -name "*.java" -exec sed -i 's/public boolean isUpdateAvailable/public boolean isUpdateAvailable() { return false; } \/\/ /g' {} +
+          # 禁用原生更新入口
+          find . -type f -name "*.java" -exec sed -i 's/checkUpdate/disableUpdate/g' {} +
+          # 彻底屏蔽 GMS 弹窗（解决登录验证失败导致的弹窗）
+          find . -name "GoogleApiAvailability.java" -exec sed -i 's/return showErrorDialogFragment/return false; \/\/ /g' {} +
+          
+          # 3. 【新改动：彻底去弹窗：镂空 Java 对话框方法】
+          # 针对可能被 JS 触发的原生弹窗进行拦截
+          echo "Disabling Native Dialogs..."
+          find . -name "*.java" -exec sed -i 's/showAtLocation/\/\/ showAtLocation/g' {} +
+          
+          # 4. 【深层：镂空 C++ 更新检查】
+          find . -type f -name "*.cc" -exec sed -i 's/updater_->CheckForUpdate()/ \/* disabled *\/ /g' {} +
+
+      - name: Ensure Android debug keystore
+        run: |
+          mkdir -p "$HOME/.android"
+          keytool -genkey -v -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: GN (Generate Armv7a Config)
+        run: |
+          # 彻底切断自动更新 Evergreen 机制
+          gn gen out/android-armv7a_gold --args='target_platform="android-arm" target_os="android" target_cpu="arm" build_type="gold" sb_api_version=15 sb_evergreen_compatible_package=false'
+
+      - name: Build Cobalt (Ninja)
+        run: |
+          export ANDROID_HOME=$GITHUB_WORKSPACE/Android
+          export ANDROID_SDK_ROOT=$GITHUB_WORKSPACE/Android
+          # 编译前强制清理缓存，确保修改生效
+          ninja -C out/android-armv7a_gold -t clean
+          ninja -C out/android-armv7a_gold cobalt_install
+
+      - name: Upload PowerTech APK
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: out/android-armv7a_gold/cobalt.apk
+          asset_name: PowerTech-Player-armv7a.apk
+          tag: main
+          overwrite: true
