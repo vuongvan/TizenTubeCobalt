@@ -12,6 +12,8 @@ env:
 jobs:
   build-armv7a:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # This allows the action to create releases and tags
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -93,5 +95,5 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: out/android-armv7a_gold/cobalt.apk
           asset_name: PowerTech-Player-armv7a.apk
-          tag: main
+          tag: latest
           overwrite: true
