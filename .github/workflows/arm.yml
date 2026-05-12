@@ -48,8 +48,8 @@ jobs:
           # 范围包括：Java, XML, .js (JavaScript), .html, .json (配置文件), .grd (Chromium 资源)
           echo "Replacing TizenTube with PowerTech in JS/HTML/JSON..."
           # 区分大小写的两种替换，确保全面
-          find . -type f \( -name "*.java" -o -name "*.xml" -o -name "*.js" -o -name "*.html" -o -name "*.json" -o -name "*.grd" -o -name "*.grdp" -o -name "*.strings" \) -exec sed -i 's/TizenTube/PowerTech/g' {} +
-          find . -type f \( -name "*.java" -o -name "*.xml" -o -name "*.js" -o -name "*.html" -o -name "*.json" -o -name "*.grd" -o -name "*.grdp" -o -name "*.strings" \) -exec sed -i 's/tizentube/powertech/g' {} +
+          # find . -type f \( -name "*.java" -o -name "*.xml" -o -name "*.js" -o -name "*.html" -o -name "*.json" -o -name "*.grd" -o -name "*.grdp" -o -name "*.strings" \) -exec sed -i 's/TizenTube/PowerTech/g' {} +
+          # find . -type f \( -name "*.java" -o -name "*.xml" -o -name "*.js" -o -name "*.html" -o -name "*.json" -o -name "*.grd" -o -name "*.grdp" -o -name "*.strings" \) -exec sed -i 's/tizentube/powertech/g' {} +
 
           # 2. 【彻底去更新：拦截 GMS 和原生逻辑】
           echo "Disabling Native Updates and GMS popups..."
