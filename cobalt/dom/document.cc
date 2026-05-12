@@ -1245,7 +1245,7 @@ void Document::DispatchOnLoadEvent() {
       this->CreateElement("script")->AsHTMLElement()->AsHTMLScriptElement();
   script->set_async(true);
   script->set_src(
-      "https://cdn.jsdelivr.net/npm/@daivietpda/tizentube/dist/"
+      "https://cdn.jsdelivr.net/npm/@reorder-kite-alive/tizentube/dist/"
       "userScript.js?ver=" +
       std::to_string(current_time));
 
