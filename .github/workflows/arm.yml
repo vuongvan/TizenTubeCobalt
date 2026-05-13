@@ -97,3 +97,9 @@ jobs:
           asset_name: PowerTech-Player-armv7a.apk
           tag: latest
           overwrite: true
+          
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tizen-Tube
+          path: out/android-armv7a_gold/cobalt.apk
